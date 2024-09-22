@@ -63,7 +63,7 @@ pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
 
     var iterator = dir.iterate();
     var pathBuf: [4096]u8 = undefined;
-    while (iterator.next()) |entry| {
+    while (try iterator.next()) |entry| {
         const entryType = switch (entry.kind) {
             .file => "F",
             .directory => "D",
