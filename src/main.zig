@@ -63,27 +63,35 @@ pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
 
     var iterator = dir.iterate();
     var pathBuf: [4096]u8 = undefined;
-    while (try iterator.next()) |entry| {
-        const entryType = switch (entry.kind) {
-            .file => "F",
-            .directory => "D",
-            else => continue,
+    while (true) {
+        const v = iterator.next() catch |err| {
+            printe("error on next directory item under {s}, so giving up on it, error {}", .{ fullPathDir, err });
+            break;
         };
-        // const abs_path = try std.fs.realpath(entry.name, &out_buf);
-        const absPath = dir.realpath(entry.name, &pathBuf) catch |err| {
-            // note this error does happen, and is not strictly necessary - bug?
-            // but zig is singular is provided a system call way of simply catting a path - just bizare
-            printe("error: create full path error on entry \"{s}\" under dir: \"{s}\" due to error: {}\n", .{ entry.name, fullPathDir, err });
-            continue;
-        };
-        print("{d} {s}: {s}\n", .{ depth, entryType, absPath });
-        // switch (entry.kind) {
-        //     .directory => try recursePath(abs_path, depth + 1),
-        //     else => {},
-        // }
+        if (v) |entry| {
+            const entryType = switch (entry.kind) {
+                .file => "F",
+                .directory => "D",
+                else => continue,
+            };
+            // const abs_path = try std.fs.realpath(entry.name, &out_buf);
+            const absPath = dir.realpath(entry.name, &pathBuf) catch |err| {
+                // note this error does happen, and is not strictly necessary - bug?
+                // but zig is singular is provided a system call way of simply catting a path - just bizare
+                printe("error: create full path error on entry \"{s}\" under dir: \"{s}\" due to error: {}\n", .{ entry.name, fullPathDir, err });
+                continue;
+            };
+            print("{d} {s}: {s}\n", .{ depth, entryType, absPath });
+            // switch (entry.kind) {
+            //     .directory => try recursePath(abs_path, depth + 1),
+            //     else => {},
+            // }
 
-        if (entry.kind == std.fs.Dir.Entry.Kind.directory) {
-            try recursePath(absPath, depth + 1);
+            if (entry.kind == std.fs.Dir.Entry.Kind.directory) {
+                try recursePath(absPath, depth + 1);
+            }
+        } else {
+            break;
         }
     }
     return;
