@@ -1,6 +1,7 @@
 const std = @import("std");
 const myio = @import("./stdio.zig");
 const util = @import("./util.zig");
+const tick = @import("./tick.zig");
 
 const print = myio.print;
 const printe = myio.printe;
@@ -24,6 +25,11 @@ pub fn startsWithAny(s: []const u8, prefixes_list: []const []const u8) bool {
 
 pub fn main() !void {
     defer flush_std_io();
+
+    try @import("./test.zig").testTicker();
+
+    std.process.exit(0);
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

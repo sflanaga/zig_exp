@@ -10,14 +10,17 @@ pub fn flush_std_io() void {
         std.debug.panic("Unable to flush std out io buffer, error: {}\n", .{err});
     };
 }
-pub fn print(comptime format: []const u8, args: anytype) void {
+pub fn printbuf(comptime format: []const u8, args: anytype) void {
     stdOBuf.writer().print(format, args) catch |err| {
         std.debug.panic("Unable to write to standard out, so panic {any}\n", .{err});
     };
 }
 
-pub fn printe(comptime format: []const u8, args: anytype) void {
+pub fn printebuf(comptime format: []const u8, args: anytype) void {
     stdEBuf.writer().print(format, args) catch |err| {
         std.debug.panic("Unable to write to standard out, so panic {any}\n", .{err});
     };
 }
+
+pub const printe = std.debug.print;
+pub const print = printbuf;
