@@ -1,7 +1,9 @@
 const std = @import("std");
+const myio = @import("src/stdio.zig");
 
-var stdOBuf = std.io.bufferedWriter(std.io.getStdOut().writer());
-var stdEBuf = std.io.bufferedWriter(std.io.getStdErr().writer());
+const print = myio.print;
+const printe = myio.printe;
+const flush_std_io = myio.flush_std_io;
 
 // var totalSize = std.atomic.Value(u64).init(0);
 var totalSize: u64 = 0;
@@ -17,26 +19,6 @@ pub fn startsWithAny(s: []const u8, prefixes_list: []const []const u8) bool {
         }
     }
     return false;
-}
-
-pub fn flush_std_io() void {
-    stdEBuf.flush() catch |err| {
-        std.debug.panic("Unable to flush std err io buffer, error: {}\n", .{err});
-    };
-    stdOBuf.flush() catch |err| {
-        std.debug.panic("Unable to flush std out io buffer, error: {}\n", .{err});
-    };
-}
-pub fn print(comptime format: []const u8, args: anytype) void {
-    stdOBuf.writer().print(format, args) catch |err| {
-        std.debug.panic("Unable to write to standard out, so panic {any}\n", .{err});
-    };
-}
-
-pub fn printe(comptime format: []const u8, args: anytype) void {
-    stdEBuf.writer().print(format, args) catch |err| {
-        std.debug.panic("Unable to write to standard out, so panic {any}\n", .{err});
-    };
 }
 
 pub const FakedError = error{

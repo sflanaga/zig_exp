@@ -1,7 +1,7 @@
 /zig-out/*
 /.zig-cache/*
 /.vscode/*
-/*
-/!build.zig
-/!build.zig.zon
+!/src/*
+/it*
+!./build*
 
