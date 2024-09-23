@@ -3,6 +3,22 @@ const std = @import("std");
 var stdOBuf = std.io.bufferedWriter(std.io.getStdOut().writer());
 var stdEBuf = std.io.bufferedWriter(std.io.getStdErr().writer());
 
+// var totalSize = std.atomic.Value(u64).init(0);
+var totalSize: u64 = 0;
+var maxFileSize: u64 = 0;
+
+const rootFilters = [_][]const u8{ "/proc", "/dev", "/sys" };
+
+pub fn startsWithAny(s: []const u8, prefixes_list: []const []const u8) bool {
+    // Loop through the list of prefixes
+    for (prefixes_list) |prefix| {
+        if (std.mem.startsWith(u8, s, prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub fn flush_std_io() void {
     stdEBuf.flush() catch |err| {
         std.debug.panic("Unable to flush std err io buffer, error: {}\n", .{err});
@@ -55,10 +71,16 @@ pub fn main() !void {
         return;
     };
 
+    // print("Total size: {d}\n", .{totalSize.load(.seq_cst)});
+    print("Total size: {}\n", .{std.fmt.fmtIntSizeBin(totalSize)});
     return;
 }
 
 pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
+    if (startsWithAny(fullPathDir, &rootFilters)) {
+        return;
+    }
+
     var dir = std.fs.openDirAbsolute(fullPathDir, .{ .iterate = true }) catch |err| {
         printe("error: during open dir \"{s}\", err: \"{}\"\n", .{ fullPathDir, err });
         return;
@@ -84,9 +106,34 @@ pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
             continue;
         };
         print("{d} {s}: {s}\n", .{ depth, entryType, absPath });
+        switch (entry.kind) {
+            .file => {
+                if (statFile(absPath)) |stat| {
+                    totalSize += stat.size;
+                    if (stat.size > maxFileSize) {
+                        maxFileSize = stat.size;
+                        printe("newmax: {s} at {d}\n", .{ absPath, maxFileSize });
+                    }
+                } else |err| {
+                    printe("error: cannot stat file: {s}, err: {}\n", .{ absPath, err });
+                }
+            },
+            else => {},
+        }
         if (entry.kind == std.fs.Dir.Entry.Kind.directory) {
             try recursePath(absPath, depth + 1);
         }
     }
     return;
+}
+pub const StatFileError = std.fs.File.OpenError || std.fs.Dir.StatError;
+
+pub fn statFile(path: []u8) !std.fs.File.Stat {
+    const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
+        printe("error: statFile on {s} with error: {}\n", .{ path, err });
+        return err;
+    };
+    defer file.close();
+    const stat = try file.stat();
+    return stat;
 }
