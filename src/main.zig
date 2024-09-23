@@ -1,5 +1,6 @@
 const std = @import("std");
-const myio = @import("src/stdio.zig");
+const myio = @import("./stdio.zig");
+const util = @import("./util.zig");
 
 const print = myio.print;
 const printe = myio.printe;
@@ -20,12 +21,6 @@ pub fn startsWithAny(s: []const u8, prefixes_list: []const []const u8) bool {
     }
     return false;
 }
-
-pub const FakedError = error{
-    Fake1,
-    ExtraArtificial,
-    TrustMeImAnError,
-};
 
 pub fn main() !void {
     defer flush_std_io();
@@ -90,7 +85,7 @@ pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
         print("{d} {s}: {s}\n", .{ depth, entryType, absPath });
         switch (entry.kind) {
             .file => {
-                if (statFile(absPath)) |stat| {
+                if (util.statFile(absPath)) |stat| {
                     totalSize += stat.size;
                     if (stat.size > maxFileSize) {
                         maxFileSize = stat.size;
@@ -107,15 +102,4 @@ pub fn recursePath(fullPathDir: []u8, depth: i32) !void {
         }
     }
     return;
-}
-pub const StatFileError = std.fs.File.OpenError || std.fs.Dir.StatError;
-
-pub fn statFile(path: []u8) !std.fs.File.Stat {
-    const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
-        printe("error: statFile on {s} with error: {}\n", .{ path, err });
-        return err;
-    };
-    defer file.close();
-    const stat = try file.stat();
-    return stat;
 }
