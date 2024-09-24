@@ -6,20 +6,12 @@ const tof64 = @import("./util.zig").tof64;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{ .verbose_log = true }){};
 const allocator = gpa.allocator();
+// const allocator = std.testing.allocator;
 
 pub const Stat = struct {
     val: std.atomic.Value(i64),
     lastSample: i64,
     name: []const u8,
-    // fn create(name: []const u8) !*Stat {
-    //     const stat = try allocator.create(Stat);
-    //     stat.* = .{
-    //         .val = std.atomic.Value(i64).init(0),
-    //         .lastSample = 0,
-    //         .name = name,
-    //     };
-    //     return stat;
-    // }
     fn init(name: []const u8) Stat {
         return Stat{
             .val = std.atomic.Value(i64).init(0),
@@ -32,19 +24,54 @@ pub const Stat = struct {
     }
 };
 
+pub const Stopper = struct {
+    stopv: bool,
+    stopcond: std.Thread.Condition,
+    stopmtx: std.Thread.Mutex,
+    fn init() Stopper {
+        return Stopper{
+            .stopv = false,
+            .stopcond = std.Thread.Condition{},
+            .stopmtx = std.Thread.Mutex{},
+        };
+    }
+    fn sendStop(self: *Stopper) void {
+        {
+            self.stopmtx.lock();
+            defer self.stopmtx.unlock();
+            self.stopv = true;
+        }
+        self.stopcond.signal();
+    }
+    fn sleep(self: *Stopper, sleeptime: u64) bool {
+        self.stopmtx.lock();
+        defer self.stopmtx.unlock();
+        self.stopcond.timedWait(&self.stopmtx, sleeptime) catch |err| {
+            if (err == error.Timeout) {
+                return false;
+            }
+        };
+        return true;
+    }
+};
+
 pub const Tick = struct {
     thread: ?std.Thread,
-    stopper: bool,
+    stopv: bool,
+    stopcond: std.Thread.Condition,
+    stopmtx: std.Thread.Mutex,
     intervalNs: u64,
     msg: []const u8,
     stats: std.ArrayList(Stat),
     pub fn init(msg: []const u8, intervalNs: u64) Tick {
         return Tick{
             .thread = null,
+            .stopv = false,
+            .stopcond = std.Thread.Condition{},
+            .stopmtx = std.Thread.Mutex{},
             .intervalNs = intervalNs,
             .msg = msg,
             .stats = std.ArrayList(Stat).init(allocator), //.init(std.heap.page_allocator),
-            .stopper = false,
         };
     }
     pub fn deinit(self: *Tick) !void {
@@ -63,11 +90,16 @@ pub const Tick = struct {
         return;
     }
     pub fn stop(self: *Tick) !void {
-        if (self.stopper == true) {
+        if (self.stopv == true) {
             return error.TICKERALREADYSENTSTOP;
         }
         if (self.thread) |thread| {
-            self.stopper = true;
+            {
+                self.stopmtx.lock();
+                defer self.stopmtx.unlock();
+                self.stopv = true;
+            }
+            self.stopcond.signal();
             thread.join();
             self.thread = null;
         } else {
@@ -100,23 +132,32 @@ fn tickerThreadFunc(self: *Tick) !void {
     var buf: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     var wr = fbs.writer();
-
-    while (!self.stopper) {
-        std.time.sleep(self.intervalNs);
-        fbs.reset();
-        try wr.print("{s}: ", .{self.msg});
-        for (self.stats.items) |*v| {
-            const sample = v.*.val.load(.seq_cst);
-            const delta = sample - v.*.lastSample;
-            const rate = tof64(delta) * tof64(std.time.ns_per_s) / tof64(self.intervalNs);
-            v.*.lastSample = sample;
-            try wr.print("[{s}: {d}/s {d}]", .{ v.*.name, rate, sample });
-        }
-        printe("{s}\n", .{fbs.getWritten()});
+    while (true) {
+        self.stopmtx.lock();
+        defer self.stopmtx.unlock();
+        self.stopcond.timedWait(&self.stopmtx, self.intervalNs) catch |err| {
+            if (err == error.Timeout) {
+                const deltaTime = tof64((try std.time.Instant.now()).since(startTime)) / tof64(std.time.ns_per_s);
+                fbs.reset();
+                try wr.print("{s}: [{d:3.3}s] ", .{ self.msg, deltaTime });
+                for (self.stats.items) |*v| {
+                    const sample = v.*.val.load(.seq_cst);
+                    const delta = sample - v.*.lastSample;
+                    const rate = tof64(delta) * tof64(std.time.ns_per_s) / tof64(self.intervalNs);
+                    v.*.lastSample = sample;
+                    try wr.print("[{s}: {d}/s {d}]", .{ v.*.name, rate, sample });
+                }
+                printe("{s}\n", .{fbs.getWritten()});
+            }
+            if (self.stopv)
+                break;
+        };
     }
     const runtime = (try std.time.Instant.now()).since(startTime);
     fbs.reset();
-    try wr.print("OVERALL {s}: ", .{self.msg});
+    const allDeltaTime = tof64((try std.time.Instant.now()).since(startTime)) / tof64(std.time.ns_per_s);
+
+    try wr.print("OVERALL {s}: [{d:3.3}s] ", .{ self.msg, allDeltaTime });
     for (self.stats.items) |*v| {
         const sample = v.*.val.load(.seq_cst);
         const delta = sample;
