@@ -24,7 +24,16 @@ pub fn testTicker() !void {
 
     std.time.sleep(std.time.ns_per_s * 3 + std.time.ns_per_ms * 250);
 
-    try statsTicker.stop();
+    statsTicker.stop();
+
+    std.time.sleep(std.time.ns_per_s * 3 + std.time.ns_per_ms * 250);
+
+    try statsTicker.start();
+
+    std.time.sleep(std.time.ns_per_s * 3 + std.time.ns_per_ms * 250);
+
+    statsTicker.stop();
+
     spinstop = true;
     spinthread.join();
 
