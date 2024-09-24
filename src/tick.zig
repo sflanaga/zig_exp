@@ -24,59 +24,16 @@ pub const Stat = struct {
     }
 };
 
-pub const Stopper = struct {
-    stopv: bool,
-    stopcond: std.Thread.Condition,
-    stopmtx: std.Thread.Mutex,
-    fn init() Stopper {
-        return Stopper{
-            .stopv = false,
-            .stopcond = std.Thread.Condition{},
-            .stopmtx = std.Thread.Mutex{},
-        };
-    }
-    fn set(self: *Stopper, v: bool) void {
-        self.stopmtx.lock();
-        defer self.stopmtx.unlock();
-        self.stopv = v;
-    }
-    fn sendStop(self: *Stopper) void {
-        {
-            self.stopmtx.lock();
-            defer self.stopmtx.unlock();
-            self.stopv = true;
-        }
-        self.stopcond.signal();
-    }
-    fn sleep(self: *Stopper, sleeptime: u64) bool {
-        self.stopmtx.lock();
-        defer self.stopmtx.unlock();
-        if (!self.stopv) {
-            self.stopcond.timedWait(&self.stopmtx, sleeptime) catch |err| {
-                if (err == error.Timeout) {
-                    return false;
-                }
-            };
-        }
-        return self.stopv;
-    }
-    fn isStopped(self: *Stopper) bool {
-        self.stopmtx.lock();
-        defer self.stopmtx.unlock();
-        return self.stopv;
-    }
-};
-
 pub const Tick = struct {
     thread: ?std.Thread,
-    stopper: Stopper,
+    stopper: std.Thread.ResetEvent,
     intervalNs: u64,
     msg: []const u8,
     stats: std.ArrayList(Stat),
     pub fn init(msg: []const u8, intervalNs: u64) Tick {
         return Tick{
             .thread = null,
-            .stopper = Stopper.init(),
+            .stopper = std.Thread.ResetEvent{},
             .intervalNs = intervalNs,
             .msg = msg,
             .stats = std.ArrayList(Stat).init(allocator), //.init(std.heap.page_allocator),
@@ -94,15 +51,16 @@ pub const Tick = struct {
         return &self.stats.items[self.stats.items.len - 1];
     }
     pub fn start(self: *Tick) !void {
-        self.stopper.set(false);
+        self.stopper.reset();
         self.thread = try std.Thread.spawn(.{}, tickerThreadShim, .{self});
         return;
     }
     pub fn stop(self: *Tick) void {
         if (self.thread) |thread| {
-            self.stopper.sendStop();
+            self.stopper.set();
             thread.join();
             self.thread = null;
+            self.stopper.reset();
         } // else if thread is not running this who cares, its stopped
     }
     fn testmod(self: *Tick) !void {
@@ -126,12 +84,21 @@ fn tickerThreadShim(self: *Tick) void {
     return;
 }
 
+fn timeoutOrKeepRunning(self: *Tick) bool { // return FALSE if set here
+    if (self.stopper.timedWait(self.intervalNs)) {
+        return !self.stopper.isSet();
+    } else |_| {
+        // error here - no matter the error - stop running in ticker
+        return true;
+    }
+}
+
 fn tickerThreadFunc(self: *Tick) !void {
     const startTime = try std.time.Instant.now();
     var buf: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     var wr = fbs.writer();
-    while (!self.stopper.sleep(self.intervalNs)) {
+    while (timeoutOrKeepRunning(self)) {
         const deltaTime = tof64((try std.time.Instant.now()).since(startTime)) / tof64(std.time.ns_per_s);
         fbs.reset();
         try wr.print("{d:3.3}s|{s}:  ", .{ deltaTime, self.msg });
