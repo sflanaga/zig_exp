@@ -11,22 +11,22 @@ pub const Stat = struct {
     val: std.atomic.Value(i64),
     lastSample: i64,
     name: []const u8,
-    fn create(name: []const u8) !*Stat {
-        const stat = try allocator.create(Stat);
-        stat.* = .{
-            .val = std.atomic.Value(i64).init(0),
-            .lastSample = 0,
-            .name = name,
-        };
-        return stat;
-    }
-    // fn init(name: []const u8) Stat {
-    //     return Stat{
+    // fn create(name: []const u8) !*Stat {
+    //     const stat = try allocator.create(Stat);
+    //     stat.* = .{
     //         .val = std.atomic.Value(i64).init(0),
     //         .lastSample = 0,
     //         .name = name,
     //     };
+    //     return stat;
     // }
+    fn init(name: []const u8) Stat {
+        return Stat{
+            .val = std.atomic.Value(i64).init(0),
+            .lastSample = 0,
+            .name = name,
+        };
+    }
     pub fn add(self: *Stat, val: i64) i64 {
         return self.val.fetchAdd(val, .seq_cst);
     }
@@ -37,20 +37,26 @@ pub const Tick = struct {
     stopper: bool,
     intervalNs: u64,
     msg: []const u8,
-    stats: std.ArrayList(*Stat),
+    stats: std.ArrayList(Stat),
     pub fn init(msg: []const u8, intervalNs: u64) Tick {
         return Tick{
             .thread = null,
             .intervalNs = intervalNs,
             .msg = msg,
-            .stats = std.ArrayList(*Stat).init(allocator), //.init(std.heap.page_allocator),
+            .stats = std.ArrayList(Stat).init(allocator), //.init(std.heap.page_allocator),
             .stopper = false,
         };
     }
+    pub fn deinit(self: *Tick) !void {
+        if (self.thread) |_| {
+            try self.stop();
+        }
+        self.stats.deinit();
+    }
+
     pub fn addStat(self: *Tick, name: []const u8) !*Stat {
-        const stat = try Stat.create(name);
-        try self.stats.append(stat);
-        return stat;
+        try self.stats.append(Stat.init(name));
+        return &self.stats.items[self.stats.items.len - 1];
     }
     pub fn start(self: *Tick) !void {
         self.thread = try std.Thread.spawn(.{}, tickerThreadShim, .{self});
@@ -99,24 +105,24 @@ fn tickerThreadFunc(self: *Tick) !void {
         std.time.sleep(self.intervalNs);
         fbs.reset();
         try wr.print("{s}: ", .{self.msg});
-        for (self.stats.items, 0..) |v, i| {
-            const sample = v.val.load(.seq_cst);
-            const delta = sample - v.lastSample;
+        for (self.stats.items) |*v| {
+            const sample = v.*.val.load(.seq_cst);
+            const delta = sample - v.*.lastSample;
             const rate = tof64(delta) * tof64(std.time.ns_per_s) / tof64(self.intervalNs);
-            self.stats.items[i].lastSample = sample;
-            try wr.print("[{s}: {d}/s {d}]", .{ v.name, rate, sample });
+            v.*.lastSample = sample;
+            try wr.print("[{s}: {d}/s {d}]", .{ v.*.name, rate, sample });
         }
         printe("{s}\n", .{fbs.getWritten()});
     }
     const runtime = (try std.time.Instant.now()).since(startTime);
     fbs.reset();
     try wr.print("OVERALL {s}: ", .{self.msg});
-    for (self.stats.items, 0..) |v, i| {
-        const sample = v.val.load(.seq_cst);
+    for (self.stats.items) |*v| {
+        const sample = v.*.val.load(.seq_cst);
         const delta = sample;
         const rate = tof64(delta) * tof64(std.time.ns_per_s) / tof64(runtime);
-        self.stats.items[i].lastSample = sample;
-        try wr.print("[{s}: {d}/s {d}]", .{ v.name, rate, sample });
+        v.*.lastSample = sample;
+        try wr.print("[{s}: {d}/s {d}]", .{ v.*.name, rate, sample });
     }
     printe("{s}\n", .{fbs.getWritten()});
     return;

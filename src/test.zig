@@ -18,4 +18,5 @@ pub fn testTicker() !void {
 
     std.time.sleep(std.time.ns_per_s * 3);
     try statsTicker.stop();
+    try statsTicker.deinit();
 }
